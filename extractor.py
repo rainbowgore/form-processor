@@ -41,20 +41,24 @@ def run_ocr(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
 
     # Azure DI call
     api_start = time.time()
+    # Respect MAX_OCR_PAGES safety bound and allow multi-page PDFs
+    pages = f"1-{MAX_OCR_PAGES}"
     poller = client.begin_analyze_document(
         model_id="prebuilt-layout",
         body={"base64Source": b64_data},
-        pages="1",  # Single page for JPG
+        pages=pages,
         output_content_format="markdown",
         string_index_type="unicodeCodePoint",
         locale=None
+        # You can also set polling_interval=1.0 if needed
     )
     
     print(f"[DEBUG] API call initiated in {time.time() - api_start:.1f}s, waiting for result...")
     
     # Wait for result
     wait_start = time.time()
-    result = poller.result()
+    # Hard timeout to avoid infinite waits in cloud
+    result = poller.result(timeout=60)
     wait_time = time.time() - wait_start
     print(f"[DEBUG] OCR processing took {wait_time:.1f}s")
     

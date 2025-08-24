@@ -3,27 +3,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    import streamlit as st  # type: ignore
+    _SECRETS = st.secrets
+except Exception:  # not running in Streamlit Cloud
+    _SECRETS = {}
+
+def _get(name: str, default: str = "") -> str:
+    if name in _SECRETS:
+        # Streamlit Cloud secrets
+        return str(_SECRETS[name])
+    # fallback to env (local .env or injected env)
+    return os.getenv(name, default)
+
 # -------- Document Intelligence ----------
-# Your names:
-DI_ENDPOINT = os.getenv("AZURE_DOC_INTEL_ENDPOINT", "")
-DI_KEY      = os.getenv("AZURE_DOC_INTEL_KEY", "")
-# Fallbacks (if someone uses earlier names):
-if not DI_ENDPOINT:
-    DI_ENDPOINT = os.getenv("AZURE_DI_ENDPOINT", "")
-if not DI_KEY:
-    DI_KEY = os.getenv("AZURE_DI_KEY", "")
+DI_ENDPOINT = _get("AZURE_DOC_INTEL_ENDPOINT") or _get("AZURE_DI_ENDPOINT")
+DI_KEY      = _get("AZURE_DOC_INTEL_KEY") or _get("AZURE_DI_KEY")
 
 # -------- Azure OpenAI ----------
-# Your names:
-AOAI_ENDPOINT   = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-AOAI_API_KEY    = os.getenv("AOAI_API_KEY", "")  # your provided var name
-AOAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-# Optional: allow either var for version; default to your value
-AOAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+AOAI_ENDPOINT   = _get("AZURE_OPENAI_ENDPOINT")
+AOAI_API_KEY    = _get("AOAI_API_KEY")
+AOAI_DEPLOYMENT = _get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+AOAI_API_VERSION = _get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
 
 # Optional embeddings if you want to extend later
-AOAI_EMBEDDINGS_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "text-embedding-ada-002")
+AOAI_EMBEDDINGS_DEPLOYMENT = _get("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "text-embedding-ada-002")
 
 # Tunables
-DEFAULT_TEMPERATURE = float(os.getenv("AOAI_TEMPERATURE", "0.1"))
-MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "6"))  # safety bound
+DEFAULT_TEMPERATURE = float(_get("AOAI_TEMPERATURE", "0.1"))
+MAX_OCR_PAGES = int(_get("MAX_OCR_PAGES", "6"))  # safety bound

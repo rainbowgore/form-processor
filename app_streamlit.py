@@ -3,6 +3,10 @@ import streamlit as st
 import time
 import traceback
 from extractor import extract_pipeline
+from config import (
+    DI_ENDPOINT, DI_KEY,
+    AOAI_ENDPOINT, AOAI_API_KEY,
+)
 
 st.set_page_config(page_title="Form Extractor", page_icon="🧾", layout="centered")
 
@@ -39,9 +43,9 @@ The app will run Azure Document Intelligence OCR and GPT-4o to produce the requi
 """)
 
 uploaded = st.file_uploader(
-    "",
-    label_visibility="collapsed",
+    "Upload a PDF/JPG/PNG",
     type=["pdf", "jpg", "jpeg", "png"],
+    label_visibility="visible",
     help="Upload your National Insurance form (PDF or image file)"
 )
 
@@ -61,6 +65,9 @@ if uploaded:
         completion_status = st.empty()
         
         try:
+            # Show secrets presence (booleans only)
+            st.caption(f"DI endpoint: {bool(DI_ENDPOINT)} | key present: {bool(DI_KEY)}")
+            st.caption(f"AOAI endpoint: {bool(AOAI_ENDPOINT)} | key present: {bool(AOAI_API_KEY)}")
             # Step 1: File Detection
             step1_status.info("🔍 **Step 1:** Detecting file type and preparing...")
             time.sleep(0.3)  # Brief pause for UX
@@ -85,7 +92,9 @@ if uploaded:
             step5_status.info("🔧 **Step 5:** Preparing fallback extraction...")
             
             # Execute the actual pipeline (this is where the real work happens)
+            st.write("Calling Azure Document Intelligence…")
             model, report, meta = extract_pipeline(file_bytes)
+            st.write("DI returned ", meta.get('ocr_characters', 0), " chars")
             
             # Update all status to completion
             step2_status.success("✅ **Step 2:** OCR completed successfully")
