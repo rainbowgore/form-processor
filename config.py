@@ -3,24 +3,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Safe Streamlit secrets access with fallback to environment variables
-try:
-    import streamlit as st
-    _SECRETS = st.secrets
-except Exception:
-    _SECRETS = {}
-
 def _get(name: str, default: str = "") -> str:
     """Get value from Streamlit secrets (Cloud) or environment variables (local)"""
-    # 1) Try Streamlit Cloud secrets first (only if they exist)
+    # 1) First try environment variables (works locally with .env)
+    env_value = os.getenv(name, None)
+    if env_value is not None:
+        return env_value
+    
+    # 2) Only try Streamlit secrets if env var not found (Cloud deployment)
     try:
-        if name in _SECRETS:
-            return str(_SECRETS[name])
-    except Exception:
+        # Import streamlit only when needed and in a try block
+        import streamlit as st
+        # Check if we're in a Streamlit context and secrets exist
+        if hasattr(st, '_get_option') and name in st.secrets:
+            return str(st.secrets[name])
+    except:
+        # If any error (including missing secrets), just fall back to default
         pass
     
-    # 2) Fallback to environment variables (works locally with .env)
-    return os.getenv(name, default)
+    return default
 
 # -------- Document Intelligence ----------
 DI_ENDPOINT = _get("AZURE_DOC_INTEL_ENDPOINT") or _get("AZURE_DI_ENDPOINT")

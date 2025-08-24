@@ -41,22 +41,27 @@ def run_ocr(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
 
     # Azure DI call
     api_start = time.time()
-    poller = client.begin_analyze_document(
-        model_id="prebuilt-layout",
-        body={"base64Source": b64_data},
-        pages="1",  # Single page for JPG
-        output_content_format="markdown",
-        string_index_type="unicodeCodePoint",
-        locale=None
-    )
-    
-    print(f"[DEBUG] API call initiated in {time.time() - api_start:.1f}s, waiting for result...")
-    
-    # Wait for result with timeout
-    wait_start = time.time()
-    result = poller.result(timeout=60)  # 60 second timeout
-    wait_time = time.time() - wait_start
-    print(f"[DEBUG] OCR processing took {wait_time:.1f}s")
+    try:
+        poller = client.begin_analyze_document(
+            model_id="prebuilt-layout",
+            body={"base64Source": b64_data},
+            pages="1-2",  # Allow up to 2 pages for PDF instead of just "1"
+            output_content_format="markdown",
+            string_index_type="unicodeCodePoint",
+            locale=None
+        )
+        
+        print(f"[DEBUG] API call initiated in {time.time() - api_start:.1f}s, waiting for result...")
+        
+        # Wait for result with shorter timeout
+        wait_start = time.time()
+        result = poller.result(timeout=30)  # Reduced to 30 seconds
+        wait_time = time.time() - wait_start
+        print(f"[DEBUG] OCR processing took {wait_time:.1f}s")
+        
+    except Exception as e:
+        print(f"[DEBUG] OCR call failed: {e}")
+        raise RuntimeError(f"Azure Document Intelligence failed: {str(e)}")
     
     total_time = time.time() - start_time
     print(f"[DEBUG] Total OCR time: {total_time:.1f}s")
