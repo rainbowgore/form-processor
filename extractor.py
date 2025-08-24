@@ -41,24 +41,20 @@ def run_ocr(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
 
     # Azure DI call
     api_start = time.time()
-    # Respect MAX_OCR_PAGES safety bound and allow multi-page PDFs
-    pages = f"1-{MAX_OCR_PAGES}"
     poller = client.begin_analyze_document(
         model_id="prebuilt-layout",
         body={"base64Source": b64_data},
-        pages=pages,
+        pages="1",  # Single page for JPG
         output_content_format="markdown",
         string_index_type="unicodeCodePoint",
         locale=None
-        # You can also set polling_interval=1.0 if needed
     )
     
     print(f"[DEBUG] API call initiated in {time.time() - api_start:.1f}s, waiting for result...")
     
-    # Wait for result
+    # Wait for result with timeout
     wait_start = time.time()
-    # Hard timeout to avoid infinite waits in cloud
-    result = poller.result(timeout=60)
+    result = poller.result(timeout=60)  # 60 second timeout
     wait_time = time.time() - wait_start
     print(f"[DEBUG] OCR processing took {wait_time:.1f}s")
     
@@ -82,7 +78,7 @@ def run_plain_ocr(file_bytes: bytes) -> str:
         model_id="prebuilt-read",
         body={"base64Source": base64.b64encode(file_bytes).decode("utf-8")}
     )
-    result = poller.result()
+    result = poller.result(timeout=60)
     return result.content or ""
 
 
@@ -98,7 +94,7 @@ def run_plain_ocr_raw(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
         model_id="prebuilt-read",
         body={"base64Source": base64.b64encode(file_bytes).decode("utf-8")}
     )
-    result = poller.result()
+    result = poller.result(timeout=60)
     return (result.content or ""), result.as_dict()
 
 
@@ -631,7 +627,7 @@ def run_ocr_fast_jpg(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
         body={"base64Source": base64.b64encode(file_bytes).decode("utf-8")},
         pages="1-2",  # Limit to first 2 pages for speed
     )
-    result = poller.result()
+    result = poller.result(timeout=60)
 
     full_text = result.content or ""
     return full_text, result.as_dict()
@@ -647,9 +643,16 @@ def extract_pipeline(file_bytes: bytes) -> Tuple[ExtractedForm, Dict[str, Any], 
     
     # Use standard OCR for all files (better accuracy)
     print("[DEBUG] Using standard OCR (prebuilt-layout)")
+    print(f"[DEBUG] DI endpoint configured: {bool(DI_ENDPOINT)}")
+    print(f"[DEBUG] DI key configured: {bool(DI_KEY)}")
     ocr_text, ocr_raw = run_ocr(file_bytes)
+    print(f"[DEBUG] OCR returned {len(ocr_text)} characters")
     
+    print("[DEBUG] Calling Azure OpenAI (GPT-4o)...")
+    print(f"[DEBUG] AOAI endpoint configured: {bool(AOAI_ENDPOINT)}")
+    print(f"[DEBUG] AOAI key configured: {bool(AOAI_API_KEY)}")
     raw_json = llm_extract(ocr_text)
+    print(f"[DEBUG] LLM extraction completed")
     print(f"[DEBUG] LLM returned lastName: '{raw_json.get('lastName', '')}'")
     print(f"[DEBUG] LLM returned firstName: '{raw_json.get('firstName', '')}'")
     print(f"[DEBUG] LLM returned idNumber: '{raw_json.get('idNumber', '')}'")
