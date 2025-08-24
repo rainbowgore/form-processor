@@ -1,5 +1,7 @@
 import json
 import streamlit as st
+import time
+import traceback
 from extractor import extract_pipeline
 
 st.set_page_config(page_title="Form Extractor", page_icon="🧾", layout="centered")
@@ -45,29 +47,95 @@ uploaded = st.file_uploader(
 
 if uploaded:
     if st.button("Run Extraction", type="primary"):
-        with st.spinner("Processing..."):
-            file_bytes = uploaded.read()
+        file_bytes = uploaded.read()
+        
+        # Create status container
+        st.subheader("Processing Pipeline")
+        
+        # Initialize status placeholders
+        step1_status = st.empty()
+        step2_status = st.empty()
+        step3_status = st.empty()
+        step4_status = st.empty()
+        step5_status = st.empty()
+        completion_status = st.empty()
+        
+        try:
+            # Step 1: File Detection
+            step1_status.info("🔍 **Step 1:** Detecting file type and preparing...")
+            time.sleep(0.3)  # Brief pause for UX
+            
+            # Step 2: OCR Processing  
+            step1_status.success("✅ **Step 1:** File type detected")
+            step2_status.info("📄 **Step 2:** Running OCR (Azure Document Intelligence)...")
+            time.sleep(0.3)
+            
+            # Step 3: LLM Extraction
+            step2_status.warning("⏳ **Step 2:** OCR processing in progress...")
+            step3_status.info("🤖 **Step 3:** Preparing data extraction with GPT-4o...")
+            time.sleep(0.3)
+            
+            # Step 4: Validation
+            step3_status.warning("⏳ **Step 3:** LLM extraction in progress...")
+            step4_status.info("✅ **Step 4:** Preparing validation and normalization...")
+            time.sleep(0.3)
+            
+            # Step 5: Fallback Processing
+            step4_status.warning("⏳ **Step 4:** Validation in progress...")
+            step5_status.info("🔧 **Step 5:** Preparing fallback extraction...")
+            
+            # Execute the actual pipeline (this is where the real work happens)
             model, report, meta = extract_pipeline(file_bytes)
-
-        # Create two columns layout
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.subheader("Validation Report")
             
-            # Display validation metrics in left column
-            if "id_checksum_valid" in report:
-                if report["id_checksum_valid"]:
-                    st.success("✅ ID checksum valid")
-                else:
-                    st.error("❌ ID checksum invalid")
+            # Update all status to completion
+            step2_status.success("✅ **Step 2:** OCR completed successfully")
+            step3_status.success("✅ **Step 3:** Data extraction completed")
+            step4_status.success("✅ **Step 4:** Validation completed")
+            step5_status.success("✅ **Step 5:** Pipeline completed successfully")
             
-            # Other validation info in left column
-            st.markdown('<p style="color: white; margin: 0 0 0.25rem 0;">might be worth checking the following:</p>', unsafe_allow_html=True)
-            st.json(report)
+            # Show completion message with stats
+            file_type = meta.get('file_type', 'unknown')
+            ocr_chars = meta.get('ocr_characters', 0)
+            completion_status.success(f"🎉 **Processing Complete!** Processed {file_type.upper()} file with {ocr_chars:,} OCR characters.")
+            
+            # Add some spacing before results
+            st.markdown("---")
+            
+        except Exception as e:
+            # Show error with more detail
+            error_details = str(e)
+            
+            # Try to identify which step failed based on error content
+            if "AZURE_DOC_INTEL" in error_details or "OCR" in error_details or "DocumentIntelligence" in error_details:
+                step2_status.error(f"❌ **Step 2 Failed:** OCR Error - {error_details}")
+                step3_status.empty()
+                step4_status.empty()
+                step5_status.empty()
+            elif "AZURE_OPENAI" in error_details or "LLM" in error_details or "OpenAI" in error_details:
+                step2_status.success("✅ **Step 2:** OCR completed successfully")
+                step3_status.error(f"❌ **Step 3 Failed:** LLM Error - {error_details}")
+                step4_status.empty()
+                step5_status.empty()
+            elif "validation" in error_details.lower() or "normalize" in error_details.lower():
+                step2_status.success("✅ **Step 2:** OCR completed successfully")
+                step3_status.success("✅ **Step 3:** Data extraction completed")
+                step4_status.error(f"❌ **Step 4 Failed:** Validation Error - {error_details}")
+                step5_status.empty()
+            else:
+                step2_status.success("✅ **Step 2:** OCR completed successfully")
+                step3_status.success("✅ **Step 3:** Data extraction completed")
+                step4_status.success("✅ **Step 4:** Validation completed")
+                step5_status.error(f"❌ **Step 5 Failed:** Pipeline Error - {error_details}")
+            
+            completion_status.error(f"🚨 **Pipeline Failed:** {error_details}")
+            
+            # Show debug info in expander
+            with st.expander("🔍 Debug Information"):
+                st.code(traceback.format_exc())
+            
+            st.stop()
 
-            st.success(f"Completeness: {report['completeness_percent']}%")
-        
+        # Show Extracted JSON first
         st.subheader("Extracted JSON")
         
         # Create columns for the JSON section only
@@ -108,7 +176,7 @@ if uploaded:
                     # Editable JSON
                     edited_json = st.text_area(
                         "Edit JSON:",
-                        value=json.dumps(model.__dict__, indent=2, ensure_ascii=False),
+                        value=json.dumps(model.model_dump(), indent=2, ensure_ascii=False),
                         height=400,
                         key="json_editor"
                     )
@@ -134,11 +202,24 @@ if uploaded:
                             st.rerun()
                 else:
                     # Read-only JSON display
-                    st.code(json.dumps(model.__dict__, indent=2, ensure_ascii=False), language="json")
+                    st.code(json.dumps(model.model_dump(), indent=2, ensure_ascii=False), language="json")
             else:
                 # Standard JSON display for non-JPG files
-                st.code(json.dumps(model.__dict__, indent=2, ensure_ascii=False), language="json")
+                st.code(json.dumps(model.model_dump(), indent=2, ensure_ascii=False), language="json")
         
         with col2:
             # Keep this empty or add edit button here
             pass
+
+        # Add separator before validation report
+        st.markdown("---")
+        
+        # Validation Report at the bottom
+        st.subheader("Validation Report")
+        
+        # Show completeness first
+        st.success(f"Completeness: {report['completeness_percent']}%")
+        
+        # Then show detailed validation info below
+        st.markdown('<p style="color: white; margin: 0 0 0.25rem 0;">might be worth checking the following:</p>', unsafe_allow_html=True)
+        st.json(report)
