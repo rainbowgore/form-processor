@@ -15,4 +15,4 @@ logs/
 phase1_data/
 
 # testing
-testing/
+testing/.devcontainer/
