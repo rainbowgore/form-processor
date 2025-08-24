@@ -1,0 +1,17 @@
+# pycache
+__pycache__/
+
+# env
+.env
+
+# venv
+venv/
+
+# logs
+logs/
+
+# data
+phase1_data/
+
+# testing
+testing/
