@@ -2,6 +2,7 @@ import base64
 import json
 import re
 from typing import Dict, Any, Tuple, List, Optional
+import concurrent.futures
 
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
@@ -39,28 +40,46 @@ def run_ocr(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
     b64_time = time.time() - b64_start
     print(f"[DEBUG] Base64 encoding took {b64_time:.1f}s")
 
-    # Azure DI call
+    # Azure DI call with guarded begin() to avoid hangs
     api_start = time.time()
     try:
-        poller = client.begin_analyze_document(
-            model_id="prebuilt-layout",
-            body={"base64Source": b64_data},
-            pages="1-2",  # Allow up to 2 pages for PDF instead of just "1"
-            output_content_format="markdown",
-            string_index_type="unicodeCodePoint",
-            locale=None
-        )
-        
+        def _begin_with_deadline(kwargs: Dict[str, Any], timeout_s: float = 15.0):
+            def _start():
+                return client.begin_analyze_document(**kwargs)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_start)
+                try:
+                    return fut.result(timeout=timeout_s)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError("Azure Document Intelligence failed: begin_analyze_document timed out")
+
+        # Try layout first
+        try:
+            poller = _begin_with_deadline({
+                "model_id": "prebuilt-layout",
+                "body": {"base64Source": b64_data},
+                "pages": "1-2",
+                "output_content_format": "markdown",
+                "string_index_type": "unicodeCodePoint",
+                "locale": None,
+            })
+        except TimeoutError as te:
+            print(f"[DEBUG] begin() stalled for layout: {te}. Falling back to prebuilt-read")
+            poller = _begin_with_deadline({
+                "model_id": "prebuilt-read",
+                "body": {"base64Source": b64_data},
+            })
+
         print(f"[DEBUG] API call initiated in {time.time() - api_start:.1f}s, waiting for result...")
-        
-        # Wait for result with shorter timeout
+
         wait_start = time.time()
-        result = poller.result(timeout=30)  # Reduced to 30 seconds
+        result = poller.result(timeout=45)
         wait_time = time.time() - wait_start
         print(f"[DEBUG] OCR processing took {wait_time:.1f}s")
-        
+
     except Exception as e:
         print(f"[DEBUG] OCR call failed: {e}")
+        # Make sure Step 2 surfaces as OCR error in UI
         raise RuntimeError(f"Azure Document Intelligence failed: {str(e)}")
     
     total_time = time.time() - start_time
@@ -627,12 +646,15 @@ def run_ocr_fast_jpg(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
     client = DocumentIntelligenceClient(DI_ENDPOINT, AzureKeyCredential(DI_KEY))
 
     # Use prebuilt-read for faster processing on JPGs
-    poller = client.begin_analyze_document(
-        model_id="prebuilt-read",  # Faster than prebuilt-layout
-        body={"base64Source": base64.b64encode(file_bytes).decode("utf-8")},
-        pages="1-2",  # Limit to first 2 pages for speed
-    )
-    result = poller.result(timeout=60)
+    try:
+        poller = client.begin_analyze_document(
+            model_id="prebuilt-read",  # Faster than prebuilt-layout
+            body={"base64Source": base64.b64encode(file_bytes).decode("utf-8")},
+        )
+        # Shorter timeout so UI surfaces Step 2 failure instead of appearing stuck
+        result = poller.result(timeout=30)
+    except Exception as e:
+        raise RuntimeError(f"Azure Document Intelligence failed: {e}")
 
     full_text = result.content or ""
     return full_text, result.as_dict()
@@ -646,11 +668,15 @@ def extract_pipeline(file_bytes: bytes) -> Tuple[ExtractedForm, Dict[str, Any], 
     file_type = _detect_file_type(file_bytes)
     print(f"[DEBUG] Detected file type: {file_type}")
     
-    # Use standard OCR for all files (better accuracy)
-    print("[DEBUG] Using standard OCR (prebuilt-layout)")
+    # Use faster OCR for JPG to avoid stalls; layout for PDFs for accuracy
     print(f"[DEBUG] DI endpoint configured: {bool(DI_ENDPOINT)}")
     print(f"[DEBUG] DI key configured: {bool(DI_KEY)}")
-    ocr_text, ocr_raw = run_ocr(file_bytes)
+    if file_type == "jpg":
+        print("[DEBUG] Using fast OCR for JPG (prebuilt-read)")
+        ocr_text, ocr_raw = run_ocr_fast_jpg(file_bytes)
+    else:
+        print("[DEBUG] Using standard OCR (prebuilt-layout)")
+        ocr_text, ocr_raw = run_ocr(file_bytes)
     print(f"[DEBUG] OCR returned {len(ocr_text)} characters")
     
     print("[DEBUG] Calling Azure OpenAI (GPT-4o)...")
@@ -675,12 +701,15 @@ def extract_pipeline(file_bytes: bytes) -> Tuple[ExtractedForm, Dict[str, Any], 
         print(f"[DEBUG] Triggering ID fallback extraction...")
         # Prefer anchored near-label extraction; if still missing, use read raw with bbox rows
         guess_id = _extract_id_from_text_anchored(ocr_text) or _extract_id_from_ocr_text(ocr_text)
-        if not guess_id:
+        
+        # Only do additional OCR for PDFs, not JPGs (to prevent hangs)
+        if not guess_id and file_type != "jpg":
             try:
                 plain_text, read_raw = run_plain_ocr_raw(file_bytes)
                 guess_id = _extract_id_from_read_raw(read_raw)
             except Exception:
                 guess_id = None
+        
         if guess_id:
             print(f"[DEBUG] ID fallback found: '{guess_id}', replacing LLM result")
             raw_json["idNumber"] = guess_id
@@ -722,8 +751,8 @@ def extract_pipeline(file_bytes: bytes) -> Tuple[ExtractedForm, Dict[str, Any], 
             guess_ln = try_extract_last_name_from_layout_text(ocr_text)
             print(f"[DEBUG] Enhanced layout extraction: '{guess_ln}'")
             
-            # If that fails, try plain OCR as fallback
-            if not guess_ln:
+            # Only do additional OCR for PDFs, not JPGs (to prevent hangs)
+            if not guess_ln and file_type != "jpg":
                 plain_text = run_plain_ocr(file_bytes)
                 guess_ln = try_extract_last_name_from_text(plain_text)
                 print(f"[DEBUG] Plain OCR extraction: '{guess_ln}'")

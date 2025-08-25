@@ -82,7 +82,7 @@ if uploaded:
             
             # Step 5: Fallback Processing
             step4_status.warning("⏳ **Step 4:** Validation in progress...")
-            step5_status.info("🔧 **Step 5:** Preparing fallback extraction...")
+            step5_status.info("🔧 **Step 5:** Preparing...")
             
             # Execute the actual pipeline (this is where the real work happens)
             model, report, meta = extract_pipeline(file_bytes)

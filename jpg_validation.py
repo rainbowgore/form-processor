@@ -301,7 +301,6 @@ def validate_and_normalize_jpg(raw: Dict[str, Any], ocr_text: str = "") -> Tuple
     report = {
         "completeness_percent": completeness,
         "missing_fields": empties,
-        "id_checksum_valid": id_ok,
         "validation_type": "JPG_SPECIFIC"
     }
     

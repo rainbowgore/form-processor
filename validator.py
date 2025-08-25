@@ -219,8 +219,7 @@ def validate_and_normalize(raw: Dict[str, Any]) -> Tuple[ExtractedForm, Dict[str
 
     report = {
         "completeness_percent": completeness,
-        "missing_fields": empties,
-        "id_checksum_valid": id_ok
+        "missing_fields": empties
     }
     
     # Add warnings if present
